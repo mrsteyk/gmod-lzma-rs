@@ -100,6 +100,46 @@ pub fn compress(data: &[u8], level: i32) -> Result<Vec<u8>, SZ> {
 	}
 }
 
+pub fn compress_valve(data: &[u8], level: i32) -> Result<Vec<u8>, SZ> {
+	unsafe {
+		let input_len = data.len();
+
+		let mut dest_size = (input_len + input_len / 3 + 128) as size_t;
+
+		let mut output = vec![0u8; dest_size as usize];
+
+		let mut props_size = LZMA_PROPS_SIZE as size_t;
+		let res = LzmaCompress(
+			output.as_mut_ptr().add(LZMA_PROPS_SIZE),
+			&mut dest_size as *mut _,
+			data.as_ptr(),
+			input_len as size_t,
+			output.as_mut_ptr(),
+			&mut props_size as *mut _,
+			level,
+			1 << 16,
+			3,
+			0,
+			2,
+			32,
+			num_cpus(),
+		) as SZ;
+
+		if props_size != LZMA_PROPS_SIZE as size_t {
+			return Err(SZ_ERROR_UNSUPPORTED);
+		}
+
+		if res != SZ_OK {
+			return Err(res);
+		}
+
+		output.truncate(dest_size as usize + LZMA_PROPS_SIZE);
+		output.shrink_to_fit();
+
+		Ok(output)
+	}
+}
+
 /// 🔮 [`util.Decompress`](https://wiki.facepunch.com/gmod/util.Decompress)
 ///
 /// Decompress a compressed slice of bytes.
@@ -136,6 +176,29 @@ pub fn decompress(data: &[u8]) -> Result<Vec<u8>, SZ> {
 			output.as_mut_ptr(),
 			&mut written as *mut _,
 			data.as_ptr().add(LZMA_PROPS_SIZE + 8),
+			&mut src_len as *mut _,
+			data.as_ptr(),
+			LZMA_PROPS_SIZE as size_t,
+		) as SZ;
+
+		if res != SZ_OK {
+			return Err(res);
+		}
+
+		Ok(output)
+	}
+}
+
+pub fn decompress_valve(data: &[u8], dest_len: u32) -> Result<Vec<u8>, SZ> {
+	unsafe {
+		let mut written = dest_len as size_t;
+		let mut output = vec![0u8; dest_len as usize];
+		let mut src_len = data.len() as size_t - LZMA_PROPS_SIZE as size_t;
+
+		let res = LzmaUncompress(
+			output.as_mut_ptr(),
+			&mut written as *mut _,
+			data.as_ptr().add(LZMA_PROPS_SIZE),
 			&mut src_len as *mut _,
 			data.as_ptr(),
 			LZMA_PROPS_SIZE as size_t,
